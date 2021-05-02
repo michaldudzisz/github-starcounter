@@ -23,7 +23,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-
+/**
+ * Request controller of application. Exposes two GET endpoints:
+ * <base url>/list/{username}?{params} and <base url>/count/{username}.
+ */
 @Controller
 @RequestMapping("")
 public class RequestController {
@@ -34,6 +37,13 @@ public class RequestController {
     @Autowired
     private GithubConnector webConnector;
 
+    /**
+     * Lists user repositories as name - star count pairs.
+     * @param username Taken from request path Github user name.
+     * @param queryMap Map of allowed query parameters with their values as String.
+     * @return One page of user repositories data (name and star count) and navigating url in response's
+     * HTTP headers for next pages.
+     */
     @GetMapping(value = listMapping + "/{username}", produces = {"application/JSON"})
     public ResponseEntity<String> listUserRepos(
             @PathVariable("username") String username,
@@ -43,57 +53,68 @@ public class RequestController {
 
         try {
             validateQuery(queryMap);
+
             GithubPageableRequestResult result = webConnector.getReposNamesAndStars(username, queryMap);
-            List<Link> links = result.getLinks();
+
             String jsonBody = new ObjectMapper().writeValueAsString(result.getReposInfosOnPage());
-            HttpHeaders headers = parseHeadersFromLinks(links, baseUrl + listMapping + "/" + username);
+
+            List<Link> nextPagesLinks = result.getPageLinks();
+            HttpHeaders headers = parseHeadersFromLinks(nextPagesLinks, baseUrl + listMapping + "/" + username);
 
             return new ResponseEntity<>(jsonBody, headers, HttpStatus.OK);
         } catch (HttpClientErrorException e) {
             throw new ResponseStatusException(e.getStatusCode(), e.getResponseBodyAsString());
         } catch (Exception e) {
             e.printStackTrace();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
+    /**
+     * Counts sum of user's stars in all repositories.
+     * @param username Taken from request path Github user name.
+     * @return User name and user stars count as JSON object.
+     */
     @GetMapping(value = countMapping + "/{username}", produces = {"application/JSON"})
     @ResponseBody
-    public String countUserStars(@PathVariable("username") String username) {
+    public ResponseEntity<String> countUserStars(@PathVariable("username") String username) {
 
         try {
             int starCount = webConnector.getUserStarCount(username);
 
-            ObjectMapper mapper = new ObjectMapper();
-            ObjectNode response = mapper.createObjectNode();
-            response.put("username", username);
-            response.put("star_count", starCount);
+            String responseBody = prepareCountResponseBody(username, starCount);
 
-            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(response);
-
+            return new ResponseEntity<>(responseBody, HttpStatus.OK);
         } catch (HttpClientErrorException e) {
             throw new ResponseStatusException(e.getStatusCode(), e.getResponseBodyAsString());
         } catch (JsonProcessingException e) {
             e.printStackTrace();
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
-    private HttpHeaders parseHeadersFromLinks(List<Link> linksList, String mappingUrl) throws RuntimeException {
+    private String prepareCountResponseBody(String username, int starCount) throws JsonProcessingException {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode bodyObject = mapper.createObjectNode();
+        bodyObject.put("username", username);
+        bodyObject.put("star_count", starCount);
+        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(bodyObject);
+    }
 
+    private HttpHeaders parseHeadersFromLinks(List<Link> linksList, String mappingUrl) throws RuntimeException {
         HttpHeaders headers = new HttpHeaders();
-        linksList = changeBaseUrl(linksList, mappingUrl);
+        linksList = changeBaseUrlFromGithubToLocal(linksList, mappingUrl);
 
         List<String> strings = linksList.stream().map(Link::toString).collect(Collectors.toList());
         headers.put("link", strings);
         return headers;
     }
 
-    private List<Link> changeBaseUrl(List<Link> linksList, String mappingUrl) throws RuntimeException {
+    private List<Link> changeBaseUrlFromGithubToLocal(List<Link> linksList, String mappingUrl) throws RuntimeException {
 
-        return linksList.stream().map(el -> {
+        return linksList.stream().map(link -> {
             try {
-                return el.withHref(mappingUrl + "?" + new URL(el.getHref()).getQuery());
+                return link.withHref(mappingUrl + "?" + new URL(link.getHref()).getQuery());
             } catch (MalformedURLException e) {
                 throw new RuntimeException(e);
             }
@@ -102,7 +123,7 @@ public class RequestController {
 
     private void validateQuery(Map<String, String> queryMap) throws HttpClientErrorException {
         Optional<Map.Entry<String, String>> wrongOptional = queryMap.entrySet().stream()
-                .filter(el -> !el.getKey().equals("per_page") && !el.getKey().equals("page"))
+                .filter(queryParam -> !queryParam.getKey().equals("per_page") && !queryParam.getKey().equals("page"))
                 .findAny();
 
         if (wrongOptional.isPresent())

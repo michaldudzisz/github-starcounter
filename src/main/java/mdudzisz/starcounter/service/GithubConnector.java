@@ -20,6 +20,9 @@ import java.net.URL;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Service class which purpose is to retrieve specified by user data from Github.
+ */
 @Service
 public class GithubConnector {
 
@@ -31,22 +34,36 @@ public class GithubConnector {
         template = new RestTemplate();
     }
 
+    /**
+     * Function fetching one specified page of data from Github.
+     * @param username Github user name whose repositories should be listed.
+     * @param queryMap Map of allowed query parameters with their values as String.
+     * @return Page of pairs -  name of repository and its star count, and additionally navigable github urls
+     * for this user. See {@link mdudzisz.starcounter.model.GithubPageableRequestResult}
+     * @throws HttpClientErrorException When unable to retrieve data from Github.
+     * @throws JsonProcessingException When there is an internal error parsing Github response.
+     */
     public GithubPageableRequestResult getReposNamesAndStars(String username, Map<String, String> queryMap)
             throws HttpClientErrorException, JsonProcessingException {
-
-        List<GithubRepoModel> reposInfos = new LinkedList<>();
 
         ResponseEntity<String> response;
 
         String url = parseUrl(username, queryMap);
 
         response = fetchUserReposDataWithUrl(url);
-        reposInfos.addAll(parseGithubRepoModels(response));
-        List<Link> links = getHeaderLinks(response);
+        List<GithubRepoModel> reposInfos = new LinkedList<>(parseGithubRepoModels(response));
+        List<Link> pagesLinks = getHeaderLinks(response);
 
-        return new GithubPageableRequestResult(reposInfos, links);
+        return new GithubPageableRequestResult(reposInfos, pagesLinks);
     }
 
+    /**
+     *
+     * @param username Github user name whose stars should be counted.
+     * @return Number of user's stars.
+     * @throws HttpClientErrorException When unable to retrieve data from Github.
+     * @throws JsonProcessingException When there is an internal error parsing Github response.
+     */
     public int getUserStarCount(String username) throws HttpClientErrorException, JsonProcessingException {
 
         int starCount = 0;
@@ -55,13 +72,13 @@ public class GithubConnector {
 
         response = fetchUserReposDataWithUsername(username);
         starCount += countStarsOnPage(response);
-        List<Link> links = getHeaderLinks(response);
+        List<Link> pageLinks = getHeaderLinks(response);
 
-        while (linksContainNext(links)) {
-            String nextPageUrl = getNextPageUrl(links);
-            response = fetchUserReposDataWithUrl(nextPageUrl);
+        while (linksContainNext(pageLinks)) {
+            Optional<String> nextPageUrlOptional = getNextPageUrl(pageLinks);
+            response = fetchUserReposDataWithUrl(nextPageUrlOptional.orElseThrow());
             starCount += countStarsOnPage(response);
-            links = getHeaderLinks(response);
+            pageLinks = getHeaderLinks(response);
         }
 
         return starCount;
@@ -102,15 +119,15 @@ public class GithubConnector {
         return links.stream().anyMatch(link -> link.getRel().value().equals("next"));
     }
 
-    private String getNextPageUrl(List<Link> links) {
+    private Optional<String> getNextPageUrl(List<Link> pageLinks) {
 
-        Optional<Link> nextPageLinkOptional = links.stream()
+        Optional<Link> nextPageLinkOptional = pageLinks.stream()
                 .filter(link -> link.getRel().value().equals("next")).findAny();
 
         if (nextPageLinkOptional.isEmpty())
-            return "";
+            return Optional.empty();
         else
-            return nextPageLinkOptional.get().getHref();
+            return Optional.of(nextPageLinkOptional.get().getHref());
     }
 
     private List<Link> getHeaderLinks(ResponseEntity<String> response) {
@@ -119,7 +136,7 @@ public class GithubConnector {
 
         if (plainStringLinks != null) {
             plainStringLinks.forEach(s -> {
-                String[] singleLinks = s.split(",");
+                String[] singleLinks = getSeparateLinks(s);
                 for (String singleLink : singleLinks) {
                     links.add(Link.valueOf(singleLink));
                 }
@@ -127,6 +144,10 @@ public class GithubConnector {
         }
 
         return links;
+    }
+
+    private String[] getSeparateLinks(String headerLinks) {
+        return headerLinks.split(",");
     }
 
     private List<GithubRepoModel> parseGithubRepoModels(ResponseEntity<String> response)

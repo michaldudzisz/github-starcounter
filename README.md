@@ -58,4 +58,3 @@ Zwracana jest wiadomość JSON typu:
 * API serwisu Github umożliwia na wysłanie jedynie 60 zapytań w ciągu godziny nieautoryzowanej aplikacji/niezalogowanemu użytkownikowi. Można zwiększyć tę liczbę logując się do serwisu lub rejestrując aplikację.
 * Niektóre komunikaty błędów mogłyby być wypisywane użytkownikowi lepiej - np. obecnie przy odmowie dostępu do danych aplikacji przez serwis Github wyświetlany jest kod błędu i cała wiadomość zwrócona przez API Github - co może być przydatne, np. gdy użytkownik wyśle zbyt wiele zapytań w krótkim odstępie czasu, lecz  dla czytelności można by było wyłuskać z odpowiedzi samo pole "message" (kod błędu jest kopiowany osobno i tak).
 * Brak logowania sytuacji wyjątkowych do pliku.
-* Nie zdążyłem napisać testów - mógłbym jeszcze je napisać. :)
